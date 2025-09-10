@@ -31,7 +31,7 @@ function normalizeSheet(jsonRows){
 }
 
 // Number input that keeps focus; commits on blur/Enter
-function NumberField({ value, placeholder, width=90, onCommit }){
+function NumberField({ value, placeholder, width='100%', onCommit }){
   const [val,setVal]=useState(value ?? '');
   useEffect(()=>{ setVal(value ?? ''); }, [value]);
   return (
@@ -119,7 +119,28 @@ export default function App(){
 
 
   const buckets=useMemo(()=> computeShopBuckets(projects, weekStarts, mapShop, confs),[projects,weekStarts,confs,mapShop]);
-  const chartData=useMemo(()=> weekStarts.map((w,i)=>({ 
+  const probTotals = useMemo(() => {
+    const totals = {
+      High: { tons: 0, count: 0 },
+      Medium: { tons: 0, count: 0 },
+      Low: { tons: 0, count: 0 },
+    };
+    projects.forEach(proj => {
+      weekStarts.forEach(w => {
+        const key = `${proj}|${w}`;
+        const c = confs[keyShop(proj, w)] || { probCat:'', expected:'' };
+        if (!c.probCat) return;
+        const cat = c.probCat;
+        if (cat !== 'High' && cat !== 'Medium' && cat !== 'Low') return;
+        const planned = mapShop.get(key) || 0;
+        const expected = c.expected !== '' ? Math.max(0, Number(c.expected)) : planned;
+        totals[cat].tons += expected;
+        totals[cat].count += 1;
+      });
+    });
+    return totals;
+  }, [projects, weekStarts, confs, mapShop, keyShop]);
+  const chartData=useMemo(()=> weekStarts.map((w,i)=>({
     week:`W${i+1} — ${w}`,
     ShopGrey:buckets[i]?.Unassigned||0, ShopHigh:buckets[i]?.High||0, ShopMed:buckets[i]?.Medium||0, ShopLow:buckets[i]?.Low||0,
     Delivery: delSummary.reduce((s,r)=>s+(r.weeks[i]||0),0)
@@ -154,7 +175,7 @@ export default function App(){
     return (<div style={{marginTop:12, padding:12, border:'1px solid #eee', borderRadius:16}}>
       <div style={{marginBottom:8}}><button onClick={()=>exportCSV(which)}>Export CSV</button></div>
       <div style={{overflow:'auto'}}>
-        <table style={{width:'100%', borderCollapse:'collapse'}}>
+        <table style={{width:'100%', borderCollapse:'collapse', tableLayout:'fixed'}}>
           <thead><tr>
             <th style={{textAlign:'left'}}>Project</th>
             {weekStarts.map((w,i)=>(<th key={w} style={{textAlign:'right'}}>W{i+1}<div style={{fontSize:12,color:'#6b7280'}}>{w}</div></th>))}
@@ -171,17 +192,19 @@ export default function App(){
                 <tr>
                   <td style={{color:'#6b7280'}}>↳ Prob / Expected</td>
                   {r.weeks.map((v,i)=>{ const w=weekStarts[i]; const planned=r.weeks[i]||0; const c=getConf(r.project,w);
-                    return (<td key={i}>
-                      <div style={{display:'flex',gap:6, alignItems:'center', flexWrap:'wrap'}}>
-                        <select value={c.probCat||''} onChange={(e)=> setConf(r.project,w,{ probCat: e.target.value })}>
-                          <option value="">—</option>
-                          <option value="High">High</option>
-                          <option value="Medium">Medium</option>
-                          <option value="Low">Low</option>
-                        </select>
-                        <NumberField value={c.expected??''} placeholder={planned? planned.toFixed(2): ''} onCommit={(s)=> setConf(r.project,w,{ expected:s })} />
-                      </div>
-                    </td>);
+                    return (
+                      <td key={i} style={{verticalAlign:'top'}}>
+                        <div style={{display:'flex', flexDirection:'column', gap:4}}>
+                          <select value={c.probCat||''} onChange={(e)=> setConf(r.project,w,{ probCat: e.target.value })} style={{width:'100%'}}>
+                            <option value="">—</option>
+                            <option value="High">High</option>
+                            <option value="Medium">Medium</option>
+                            <option value="Low">Low</option>
+                          </select>
+                          <NumberField value={c.expected??''} placeholder={planned? planned.toFixed(2): ''} onCommit={(s)=> setConf(r.project,w,{ expected:s })} />
+                        </div>
+                      </td>
+                    );
                   })}
                   <td></td>
                 </tr>
@@ -231,6 +254,18 @@ export default function App(){
     <div style={{fontWeight:700, fontSize:20}}>
       Shop: {kpis.projShop} &nbsp;•&nbsp; Delivery: {kpis.projDel}
     </div>
+  </div>
+  <div style={{background:'#fff', border:'1px solid #e5e7eb', borderRadius:16, padding:14}}>
+    <div style={{color:'#6b7280', fontSize:12}}>High Probability (next {look})</div>
+    <div style={{fontWeight:700, fontSize:20}}>{probTotals.High.count} cards — {probTotals.High.tons.toFixed(2)}</div>
+  </div>
+  <div style={{background:'#fff', border:'1px solid #e5e7eb', borderRadius:16, padding:14}}>
+    <div style={{color:'#6b7280', fontSize:12}}>Medium Probability (next {look})</div>
+    <div style={{fontWeight:700, fontSize:20}}>{probTotals.Medium.count} cards — {probTotals.Medium.tons.toFixed(2)}</div>
+  </div>
+  <div style={{background:'#fff', border:'1px solid #e5e7eb', borderRadius:16, padding:14}}>
+    <div style={{color:'#6b7280', fontSize:12}}>Low Probability (next {look})</div>
+    <div style={{fontWeight:700, fontSize:20}}>{probTotals.Low.count} cards — {probTotals.Low.tons.toFixed(2)}</div>
   </div>
 </div>
 <div style={{maxWidth: 1100, margin: '12px auto 0'}}>
