@@ -140,6 +140,38 @@ export default function App(){
     });
     return totals;
   }, [projects, weekStarts, confs, mapShop, keyShop]);
+
+  const kpiCards = [
+    { key: 'shop',    label: `Shop Planned (next ${look})`, value: kpis.shop.toFixed(2) },
+    { key: 'del',     label: `Deliveries (next ${look})`,    value: kpis.del.toFixed(2) },
+    {
+      key: 'backlog',
+      label: 'Backlog (Shop − Deliveries)',
+      value: backlog.toFixed(2),
+      valueColor: backlog >= 0 ? '#111827' : '#ef4444'
+    },
+    {
+      key: 'proj',
+      label: 'Projects in window',
+      value: `Shop: ${kpis.projShop} • Delivery: ${kpis.projDel}`
+    },
+    {
+      key: 'high',
+      label: `High Probability (next ${look})`,
+      value: `${probTotals.High.count} cards — ${probTotals.High.tons.toFixed(2)}`
+    },
+    {
+      key: 'medium',
+      label: `Medium Probability (next ${look})`,
+      value: `${probTotals.Medium.count} cards — ${probTotals.Medium.tons.toFixed(2)}`
+    },
+    {
+      key: 'low',
+      label: `Low Probability (next ${look})`,
+      value: `${probTotals.Low.count} cards — ${probTotals.Low.tons.toFixed(2)}`
+    }
+  ];
+  const kpiCols = Math.ceil(kpiCards.length / 2);
   const chartData=useMemo(()=> weekStarts.map((w,i)=>({
     week:`W${i+1} — ${w}`,
     ShopGrey:buckets[i]?.Unassigned||0, ShopHigh:buckets[i]?.High||0, ShopMed:buckets[i]?.Medium||0, ShopLow:buckets[i]?.Low||0,
@@ -228,46 +260,44 @@ export default function App(){
     </div>
     <div style={{margin:'12px 0'}}>Load Excel: <input type="file" accept=".xlsx,.xls" onChange={e=> e.target.files && e.target.files[0] && onUploadFile(e.target.files[0])} /></div>
     {/* KPI cards */}
-<div style={{
-  display: 'grid',
-  gridTemplateColumns: 'repeat(1,1fr)',
-  gap: 12,
-  maxWidth: 1100,
-  margin: '12px auto 0',
-}}>
-  <div style={{background:'#fff', border:'1px solid #e5e7eb', borderRadius:16, padding:14}}>
-    <div style={{color:'#6b7280', fontSize:12}}>Shop Planned (next {look})</div>
-    <div style={{fontWeight:700, fontSize:20}}>{kpis.shop.toFixed(2)}</div>
-  </div>
-  <div style={{background:'#fff', border:'1px solid #e5e7eb', borderRadius:16, padding:14}}>
-    <div style={{color:'#6b7280', fontSize:12}}>Deliveries (next {look})</div>
-    <div style={{fontWeight:700, fontSize:20}}>{kpis.del.toFixed(2)}</div>
-  </div>
-  <div style={{background:'#fff', border:'1px solid #e5e7eb', borderRadius:16, padding:14}}>
-    <div style={{color:'#6b7280', fontSize:12}}>Backlog (Shop − Deliveries)</div>
-    <div style={{fontWeight:700, fontSize:20, color: backlog >= 0 ? '#111827' : '#ef4444'}}>
-      {backlog.toFixed(2)}
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: `repeat(${kpiCols},1fr)`,
+        gap: 12,
+        maxWidth: 1100,
+        margin: '12px auto 0',
+      }}
+    >
+      {kpiCards.map(card => (
+        <div
+          key={card.key}
+          style={{
+            background: '#fff',
+            border: '1px solid #e5e7eb',
+            borderRadius: 16,
+            padding: 14,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            alignItems: 'center',
+            aspectRatio: '1',
+            textAlign: 'center',
+          }}
+        >
+          <div style={{ color: '#6b7280', fontSize: 12 }}>{card.label}</div>
+          <div
+            style={{
+              fontWeight: 700,
+              fontSize: 20,
+              color: card.valueColor || '#111827',
+            }}
+          >
+            {card.value}
+          </div>
+        </div>
+      ))}
     </div>
-  </div>
-  <div style={{background:'#fff', border:'1px solid #e5e7eb', borderRadius:16, padding:14}}>
-    <div style={{color:'#6b7280', fontSize:12}}>Projects in window</div>
-    <div style={{fontWeight:700, fontSize:20}}>
-      Shop: {kpis.projShop} &nbsp;•&nbsp; Delivery: {kpis.projDel}
-    </div>
-  </div>
-  <div style={{background:'#fff', border:'1px solid #e5e7eb', borderRadius:16, padding:14}}>
-    <div style={{color:'#6b7280', fontSize:12}}>High Probability (next {look})</div>
-    <div style={{fontWeight:700, fontSize:20}}>{probTotals.High.count} cards — {probTotals.High.tons.toFixed(2)}</div>
-  </div>
-  <div style={{background:'#fff', border:'1px solid #e5e7eb', borderRadius:16, padding:14}}>
-    <div style={{color:'#6b7280', fontSize:12}}>Medium Probability (next {look})</div>
-    <div style={{fontWeight:700, fontSize:20}}>{probTotals.Medium.count} cards — {probTotals.Medium.tons.toFixed(2)}</div>
-  </div>
-  <div style={{background:'#fff', border:'1px solid #e5e7eb', borderRadius:16, padding:14}}>
-    <div style={{color:'#6b7280', fontSize:12}}>Low Probability (next {look})</div>
-    <div style={{fontWeight:700, fontSize:20}}>{probTotals.Low.count} cards — {probTotals.Low.tons.toFixed(2)}</div>
-  </div>
-</div>
 <div style={{maxWidth: 1100, margin: '12px auto 0'}}>
   <div style={{height: 260, border:'1px solid #eee', borderRadius:16, padding:12}}>
     <ResponsiveContainer width="100%" height="100%">
