@@ -10,7 +10,22 @@ const COLORS = { shopHigh:'#16a34a', shopMed:'#f59e0b', shopLow:'#ef4444', shopG
 function excelSerialToDate(n){ const ms = EXCEL_EPOCH + Math.round(Number(n))*ONE_DAY; return new Date(ms); }
 function toMonday(d){ const dd=new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate())); const day=dd.getUTCDay(); const diff=(day+6)%7; dd.setUTCDate(dd.getUTCDate()-diff); return dd; }
 function fmtISO(d){ return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`; }
-function parseHeaderToDateKey(k){ if(k==null) return null; if(typeof k==='number') return fmtISO(toMonday(excelSerialToDate(k))); if(k instanceof Date && !isNaN(k)) return fmtISO(toMonday(k)); if(typeof k==='string'){ const s=k.replace(/\s+\d{2}:\d{2}:\d{2}$/,''); const d=new Date(s); if(!isNaN(d)) return fmtISO(toMonday(d)); } return null; }
+function parseHeaderToDateKey(k){
+  if(k==null) return null;
+  if(typeof k==='number') return fmtISO(toMonday(excelSerialToDate(k)));
+  if(k instanceof Date && !isNaN(k)) return fmtISO(toMonday(k));
+  if(typeof k==='string'){
+    const s = k.trim();
+    // If header is a numeric string (e.g. "44952"), treat as Excel serial
+    if(/^\d+(\.\d+)?$/.test(s)){
+      return fmtISO(toMonday(excelSerialToDate(Number(s))));
+    }
+    const cleaned = s.replace(/\s+\d{2}:\d{2}:\d{2}$/,'');
+    const d = new Date(cleaned);
+    if(!isNaN(d)) return fmtISO(toMonday(d));
+  }
+  return null;
+}
 function num(v){ const n=typeof v==='string'? parseFloat(v.replace(/,/g,'')) : Number(v); return isFinite(n)? n:0; }
 
 function normalizeSheet(jsonRows){
@@ -103,6 +118,18 @@ function aoaToSheet(aoa) {
   return XLSX.utils.aoa_to_sheet(trimmed);
 }
 
+// Apply a simple date number format to first-row numeric headers
+function formatHeaderDates(ws) {
+  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
+  for (let c = range.s.c + 1; c <= range.e.c; c++) {
+    const addr = XLSX.utils.encode_cell({ r: 0, c });
+    const cell = ws[addr];
+    if (cell && typeof cell.v === 'number') {
+      cell.z = 'm/d/yyyy';
+    }
+  }
+}
+
 function startsWithAny(s, prefixes) {
   if (s == null) return false;
   const v = String(s).trim();
@@ -162,6 +189,7 @@ function cleanRawToDashboard(wbRaw) {
   // Delete the column named "Grand Total" (if present)
   aoaLoad = deleteColumnByHeader(aoaLoad, "Grand Total");
   const wsLoadClean = aoaToSheet(aoaLoad);
+  formatHeaderDates(wsLoadClean);
 
   // --- Clean Expected Issue to Shop (from "Expected Issue to Shop_1")
   const wsShopRaw = wbRaw.Sheets[keepExpected];
@@ -173,6 +201,7 @@ function cleanRawToDashboard(wbRaw) {
   // Filter Column A entries
   aoaShop = filterOutByColA(aoaShop, prefixes);
   const wsShopClean = aoaToSheet(aoaShop);
+  formatHeaderDates(wsShopClean);
 
   // --- Build new workbook
   const wbNew = XLSX.utils.book_new();
