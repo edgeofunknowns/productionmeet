@@ -108,8 +108,15 @@ export default function App(){
   const shopSummary=useMemo(()=>summarize('Shop'),[projects,weekStarts,mapShop]);
   const delSummary=useMemo(()=>summarize('Delivery'),[projects,weekStarts,mapLoad]);
 
-  const kpis=useMemo(()=>({ shop: shopSummary.reduce((s,r)=>s+r.total,0), del: delSummary.reduce((s,r)=>s+r.total,0) }),[shopSummary,delSummary]);
+  const kpis = useMemo(() => ({
+  shop: shopSummary.reduce((s, r) => s + r.total, 0),
+  del:  delSummary.reduce((s, r) => s + r.total, 0),
+  projShop: shopSummary.filter(r => r.total > 0).length,
+  projDel:  delSummary.filter(r => r.total > 0).length,
+  }), [shopSummary, delSummary]);
+
   const backlog = kpis.shop - kpis.del;
+
 
   const buckets=useMemo(()=> computeShopBuckets(projects, weekStarts, mapShop, confs),[projects,weekStarts,confs,mapShop]);
   const chartData=useMemo(()=> weekStarts.map((w,i)=>({ 
@@ -197,29 +204,60 @@ export default function App(){
       <label>Hide zeros <input type="checkbox" checked={hideZero} onChange={e=>setHideZero(e.target.checked)} /></label>
     </div>
     <div style={{margin:'12px 0'}}>Load Excel: <input type="file" accept=".xlsx,.xls" onChange={e=> e.target.files && e.target.files[0] && onUploadFile(e.target.files[0])} /></div>
-    <div style={{height:320,border:'1px solid #eee',borderRadius:16,padding:12}}>
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={chartData}>
-  <CartesianGrid strokeDasharray="3 3" />
-  <XAxis dataKey="week" /><YAxis /><Tooltip /><Legend />
-
-  {/* Show Shop bars unless view = Delivery */}
-  {view !== 'delivery' && (
-    <>
-      <Bar stackId="shop" dataKey="ShopGrey" name="Shop — Unassigned" fill="#9ca3af"/>
-      <Bar stackId="shop" dataKey="ShopHigh" name="Shop — High" fill="#16a34a"/>
-      <Bar stackId="shop" dataKey="ShopMed" name="Shop — Medium" fill="#f59e0b"/>
-      <Bar stackId="shop" dataKey="ShopLow" name="Shop — Low" fill="#ef4444"/>
-    </>
-  )}
-
-  {/* Show Delivery bar unless view = Shop */}
-  {view !== 'shop' && (
-    <Bar dataKey="Delivery" name="Delivery (planned)" fill="#2563eb"/>
-  )}
-        </BarChart>
-      </ResponsiveContainer>
+    {/* KPI cards */}
+<div style={{
+  display: 'grid',
+  gridTemplateColumns: 'repeat(1,1fr)',
+  gap: 12,
+  maxWidth: 1100,
+  margin: '12px auto 0',
+}}>
+  <div style={{background:'#fff', border:'1px solid #e5e7eb', borderRadius:16, padding:14}}>
+    <div style={{color:'#6b7280', fontSize:12}}>Shop Planned (next {look})</div>
+    <div style={{fontWeight:700, fontSize:20}}>{kpis.shop.toFixed(2)}</div>
+  </div>
+  <div style={{background:'#fff', border:'1px solid #e5e7eb', borderRadius:16, padding:14}}>
+    <div style={{color:'#6b7280', fontSize:12}}>Deliveries (next {look})</div>
+    <div style={{fontWeight:700, fontSize:20}}>{kpis.del.toFixed(2)}</div>
+  </div>
+  <div style={{background:'#fff', border:'1px solid #e5e7eb', borderRadius:16, padding:14}}>
+    <div style={{color:'#6b7280', fontSize:12}}>Backlog (Shop − Deliveries)</div>
+    <div style={{fontWeight:700, fontSize:20, color: backlog >= 0 ? '#111827' : '#ef4444'}}>
+      {backlog.toFixed(2)}
     </div>
+  </div>
+  <div style={{background:'#fff', border:'1px solid #e5e7eb', borderRadius:16, padding:14}}>
+    <div style={{color:'#6b7280', fontSize:12}}>Projects in window</div>
+    <div style={{fontWeight:700, fontSize:20}}>
+      Shop: {kpis.projShop} &nbsp;•&nbsp; Delivery: {kpis.projDel}
+    </div>
+  </div>
+</div>
+<div style={{maxWidth: 1100, margin: '12px auto 0'}}>
+  <div style={{height: 260, border:'1px solid #eee', borderRadius:16, padding:12}}>
+    <ResponsiveContainer width="100%" height="100%">
+      <BarChart data={chartData}>
+        <CartesianGrid strokeDasharray="3 3" />
+        <XAxis dataKey="week" /><YAxis /><Tooltip /><Legend />
+
+        {/* Shop bars shown unless view=delivery */}
+        {view !== 'delivery' && (
+          <>
+            <Bar stackId="shop" dataKey="ShopGrey"  name="Shop — Unassigned" fill="#9ca3af" />
+            <Bar stackId="shop" dataKey="ShopHigh"  name="Shop — High"       fill="#16a34a" />
+            <Bar stackId="shop" dataKey="ShopMed"   name="Shop — Medium"     fill="#f59e0b" />
+            <Bar stackId="shop" dataKey="ShopLow"   name="Shop — Low"        fill="#ef4444" />
+          </>
+        )}
+
+        {/* Delivery bar shown unless view=shop */}
+        {view !== 'shop' && (
+          <Bar dataKey="Delivery" name="Delivery (planned)" fill="#2563eb" />
+        )}
+      </BarChart>
+    </ResponsiveContainer>
+  </div>
+</div>
     <h3>Shop Lookahead</h3>
     <LookaheadTable which="Shop" />
     <h3>Delivery Lookahead</h3>
