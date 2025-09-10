@@ -37,7 +37,7 @@ function NumberField({ value, placeholder, width=90, onCommit }){
   return (
     <input
       className="input"
-      style={{width, border:'1px solid #e5e7eb', borderRadius:12, padding:'6px 8px', fontSize:14}}
+      style={{width, border:'1px solid #d1d5db', borderRadius:8, padding:'4px 6px', fontSize:13, minWidth:60}}
       value={val}
       placeholder={placeholder}
       onChange={(e)=> setVal(e.target.value)}
@@ -154,7 +154,7 @@ export default function App(){
             <th style={{textAlign:'right'}}>Next {look} Total</th>
           </tr></thead>
           <tbody>
-            {data.map(r=> (<React.Fragment key={r.project}>
+            {(hideZero ? data.filter(r => r.total > 0) : data).map(r=> (<React.Fragment key={r.project}>
               <tr>
                 <td><strong>{r.project}</strong></td>
                 {r.weeks.map((v,i)=>(<td key={i} style={{textAlign:'right'}}>{v? v.toFixed(2): ''}</td>))}
@@ -165,7 +165,7 @@ export default function App(){
                   <td style={{color:'#6b7280'}}>↳ Prob / Expected</td>
                   {r.weeks.map((v,i)=>{ const w=weekStarts[i]; const planned=r.weeks[i]||0; const c=getConf(r.project,w);
                     return (<td key={i}>
-                      <div style={{display:'flex',gap:6}}>
+                      <div style={{display:'flex',gap:6, alignItems:'center', flexWrap:'wrap'}}>
                         <select value={c.probCat||''} onChange={(e)=> setConf(r.project,w,{ probCat: e.target.value })}>
                           <option value="">—</option>
                           <option value="High">High</option>
@@ -200,13 +200,23 @@ export default function App(){
     <div style={{height:320,border:'1px solid #eee',borderRadius:16,padding:12}}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={chartData}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="week" /><YAxis /><Tooltip /><Legend />
-          <Bar stackId="shop" dataKey="ShopGrey" name="Shop — Unassigned" fill="#9ca3af"/>
-          <Bar stackId="shop" dataKey="ShopHigh" name="Shop — High" fill="#16a34a"/>
-          <Bar stackId="shop" dataKey="ShopMed" name="Shop — Medium" fill="#f59e0b"/>
-          <Bar stackId="shop" dataKey="ShopLow" name="Shop — Low" fill="#ef4444"/>
-          <Bar dataKey="Delivery" name="Delivery (planned)" fill="#2563eb"/>
+  <CartesianGrid strokeDasharray="3 3" />
+  <XAxis dataKey="week" /><YAxis /><Tooltip /><Legend />
+
+  {/* Show Shop bars unless view = Delivery */}
+  {view !== 'delivery' && (
+    <>
+      <Bar stackId="shop" dataKey="ShopGrey" name="Shop — Unassigned" fill="#9ca3af"/>
+      <Bar stackId="shop" dataKey="ShopHigh" name="Shop — High" fill="#16a34a"/>
+      <Bar stackId="shop" dataKey="ShopMed" name="Shop — Medium" fill="#f59e0b"/>
+      <Bar stackId="shop" dataKey="ShopLow" name="Shop — Low" fill="#ef4444"/>
+    </>
+  )}
+
+  {/* Show Delivery bar unless view = Shop */}
+  {view !== 'shop' && (
+    <Bar dataKey="Delivery" name="Delivery (planned)" fill="#2563eb"/>
+  )}
         </BarChart>
       </ResponsiveContainer>
     </div>
