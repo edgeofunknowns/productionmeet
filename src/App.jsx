@@ -72,6 +72,112 @@ function computeShopBuckets(projects, weekStarts, mapShop, confirmations){
   return buckets;
 }
 
+
+// ---------- XLSX helpers for cleaning RAW -> Dashboard ----------
+function sheetToAOA(ws) {
+  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
+  const aoa = [];
+  for (let r = range.s.r; r <= range.e.r; r++) {
+    const row = [];
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      const cell = ws[addr];
+      row.push(cell ? cell.v : undefined);
+    }
+    aoa.push(row);
+  }
+  return aoa;
+}
+
+function aoaToSheet(aoa) {
+  // Trim right-side undefined to keep widths tight
+  const trimmed = aoa.map(row => {
+    let end = row.length;
+    while (end > 0 && (row[end-1] === undefined || row[end-1] === null || row[end-1] === "")) end--;
+    return row.slice(0, end);
+  });
+  return XLSX.utils.aoa_to_sheet(trimmed);
+}
+
+function startsWithAny(s, prefixes) {
+  if (s == null) return false;
+  const v = String(s).trim();
+  return prefixes.some(p => v.startsWith(p));
+}
+
+// Delete FIRST column whose header equals headerName (case insensitive)
+function deleteColumnByHeader(aoa, headerName) {
+  if (!aoa.length) return aoa;
+  const hdrRow = aoa[0].map(v => (v == null ? "" : String(v)));
+  const idx = hdrRow.findIndex(h => h.toLowerCase() === headerName.toLowerCase());
+  if (idx === -1) return aoa;
+  return aoa.map(row => row.filter((_, i) => i !== idx));
+}
+
+// Delete column at fixed index (0-based). No-op if out of range.
+function deleteColumnIndex(aoa, idx) {
+  if (idx == null || idx < 0) return aoa;
+  return aoa.map(row => row.filter((_, i) => i !== idx));
+}
+
+// Filter out rows where first column starts with any of given prefixes (skip header)
+function filterOutByColA(aoa, prefixes) {
+  if (!aoa.length) return aoa;
+  const [hdr, ...rest] = aoa;
+  const kept = rest.filter(row => !startsWithAny(row[0], prefixes));
+  return [hdr, ...kept];
+}
+
+// Make a Blob for download from a workbook
+function makeXlsxBlob(wb) {
+  const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  return new Blob([wbout], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
+
+/**
+ * Transform a RAW workbook to the “Dashboard” shape in-memory.
+ * Keeps two sheets and returns a NEW workbook:
+ *   - Loading_Tons
+ *   - Expected Issue to Shop
+ */
+function cleanRawToDashboard(wbRaw) {
+  const keepExpected = "Expected Issue to Shop_1";
+  const keepLoading  = "_1";
+  if (!wbRaw.SheetNames.includes(keepExpected) || !wbRaw.SheetNames.includes(keepLoading)) {
+    // Not a RAW workbook we recognize; return null to skip
+    return null;
+  }
+
+  const prefixes = ["DF", "WW", "Grand", "99-997"];
+
+  // --- Clean Loading_Tons (from "_1")
+  const wsLoadRaw = wbRaw.Sheets[keepLoading];
+  let aoaLoad = sheetToAOA(wsLoadRaw);
+  // Filter Column A entries
+  aoaLoad = filterOutByColA(aoaLoad, prefixes);
+  // Delete the column named "Grand Total" (if present)
+  aoaLoad = deleteColumnByHeader(aoaLoad, "Grand Total");
+  const wsLoadClean = aoaToSheet(aoaLoad);
+
+  // --- Clean Expected Issue to Shop (from "Expected Issue to Shop_1")
+  const wsShopRaw = wbRaw.Sheets[keepExpected];
+  let aoaShop = sheetToAOA(wsShopRaw);
+  // If Column B header is "Grand Total", delete it (column index 1)
+  if (aoaShop.length && String(aoaShop[0][1] || "").toLowerCase() === "grand total".toLowerCase()) {
+    aoaShop = deleteColumnIndex(aoaShop, 1);
+  }
+  // Filter Column A entries
+  aoaShop = filterOutByColA(aoaShop, prefixes);
+  const wsShopClean = aoaToSheet(aoaShop);
+
+  // --- Build new workbook
+  const wbNew = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wbNew, wsLoadClean, "Loading_Tons");
+  XLSX.utils.book_append_sheet(wbNew, wsShopClean, "Expected Issue to Shop");
+
+  return wbNew;
+}
+
 export default function App(){
   const [loadingRows,setLoadingRows]=useState([]);
   const [shopRows,setShopRows]=useState([]);
@@ -80,6 +186,7 @@ export default function App(){
   const [look,setLook]=useState(4);
   const [hideZero,setHideZero]=useState(false);
   const [view,setView]=useState('both');
+  const [cleanedBlob, setCleanedBlob] = useState(null);   // Blob of cleaned Dashboard.xlsx if we converted a RAW file
 
   const [confs,setConfs]=useState(()=>({}));
   const keyShop=(p,w)=>`Shop|${p}|${w}`;
@@ -177,19 +284,36 @@ export default function App(){
     Delivery: delSummary.reduce((s,r)=>s+(r.weeks[i]||0),0)
   })),[weekStarts,buckets,delSummary]);
 
-  function onUploadFile(file){
-    const reader=new FileReader();
-    reader.onload=(e)=>{
-      const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array'});
-      const names=wb.SheetNames;
-      const shopName = names.find(n=>/expected\s*issue|shop/i.test(n)) || names[1] || names[0];
-      const loadName = names.find(n=>/load|deliver/i.test(n)) || names[0];
-      const shopJson = XLSX.utils.sheet_to_json(wb.Sheets[shopName],{defval:null,raw:true});
-      const loadJson = XLSX.utils.sheet_to_json(wb.Sheets[loadName],{defval:null,raw:true});
-      const sNorm = normalizeSheet(shopJson); const lNorm = normalizeSheet(loadJson);
-      setShopRows(sNorm.long); setLoadingRows(lNorm.long);
+  function onUploadFile(f) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const data = new Uint8Array(e.target.result);
+      let wb = XLSX.read(data, { type: "array" });
+
+      // If it looks like RAW (Expected Issue to Shop_1 + _1), clean it first
+      const maybeClean = cleanRawToDashboard(wb);
+      if (maybeClean) {
+        wb = maybeClean; // use cleaned
+        setCleanedBlob(makeXlsxBlob(wb)); // enable "Download cleaned" button
+      } else {
+        setCleanedBlob(null); // already clean; no blob
+      }
+
+      // Names after cleaning (or if already clean)
+      const names = wb.SheetNames;
+      const shopName = names.find((n) => /expected\s*issue\s*to\s*shop$/i.test(n)) || names[1] || names[0];
+      const loadName = names.find((n) => /^loading\s*_?tons$/i.test(n)) || names[0];
+
+      const shopJson = XLSX.utils.sheet_to_json(wb.Sheets[shopName], { defval: null, raw: true });
+      const loadJson = XLSX.utils.sheet_to_json(wb.Sheets[loadName], { defval: null, raw: true });
+
+      const shopNorm = normalizeSheet(shopJson);
+      const loadNorm = normalizeSheet(loadJson);
+
+      setShopRows(shopNorm.long);
+      setLoadingRows(loadNorm.long);
     };
-    reader.readAsArrayBuffer(file);
+    reader.readAsArrayBuffer(f);
   }
 
   function exportCSV(which){
@@ -257,7 +381,23 @@ export default function App(){
       </label>
       <label>Hide zeros <input type="checkbox" checked={hideZero} onChange={e=>setHideZero(e.target.checked)} /></label>
     </div>
-    <div style={{margin:'12px 0'}}>Load Excel: <input type="file" accept=".xlsx,.xls" onChange={e=> e.target.files && e.target.files[0] && onUploadFile(e.target.files[0])} /></div>
+    <div style={{margin:'12px 0'}}>Load Excel: <input type="file" accept=".xlsx,.xls" onChange={e=> e.target.files && e.target.files[0] && onUploadFile(e.target.files[0])} />
+    {cleanedBlob && (
+      <button
+        style={{marginLeft:8, padding:'6px 10px', borderRadius:8}}
+        onClick={() => {
+          const url = URL.createObjectURL(cleanedBlob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "Dashboard.xlsx";
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 500);
+        }}
+      >
+        Download cleaned Dashboard.xlsx
+      </button>
+    )}
+  </div>
     {/* KPI cards */}
     <div
       style={{
