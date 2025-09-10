@@ -171,7 +171,6 @@ export default function App(){
       value: `${probTotals.Low.count} cards — ${probTotals.Low.tons.toFixed(2)}`
     }
   ];
-  const kpiCols = Math.ceil(kpiCards.length / 2);
   const chartData=useMemo(()=> weekStarts.map((w,i)=>({
     week:`W${i+1} — ${w}`,
     ShopGrey:buckets[i]?.Unassigned||0, ShopHigh:buckets[i]?.High||0, ShopMed:buckets[i]?.Medium||0, ShopLow:buckets[i]?.Low||0,
@@ -250,7 +249,7 @@ export default function App(){
 
   return (<div style={{padding:24,fontFamily:'ui-sans-serif,system-ui'}}>
     <h2>Shop & Delivery Dashboard</h2>
-    <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,maxWidth:900}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:12}}>
       <label>Start <input type="date" value={startISO} onChange={e=>setStartISO(e.target.value)} /></label>
       <label>Lookahead <input type="number" min="1" max="26" value={look} onChange={e=>setLook(Math.max(1,Math.min(26, Number(e.target.value)||4)))} /></label>
       <label>View
@@ -263,10 +262,9 @@ export default function App(){
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: `repeat(${kpiCols},1fr)`,
+        gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))',
         gap: 12,
-        maxWidth: 1100,
-        margin: '12px auto 0',
+        margin: '12px 0 0',
       }}
     >
       {kpiCards.map(card => (
@@ -275,13 +273,13 @@ export default function App(){
           style={{
             background: '#fff',
             border: '1px solid #e5e7eb',
-            borderRadius: 16,
-            padding: 14,
+            borderRadius: 12,
+            padding: 12,
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'center',
             alignItems: 'center',
-            aspectRatio: '1',
+            aspectRatio: '2',
             textAlign: 'center',
           }}
         >
@@ -298,7 +296,7 @@ export default function App(){
         </div>
       ))}
     </div>
-<div style={{maxWidth: 1100, margin: '12px auto 0'}}>
+<div style={{margin: '12px 0 0'}}>
   <div style={{height: 260, border:'1px solid #eee', borderRadius:16, padding:12}}>
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={chartData}>
