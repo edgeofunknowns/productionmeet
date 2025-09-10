@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from "recharts";
+import { ResponsiveContainer, ComposedChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, Line, LabelList } from "recharts";
 
 // --- constants & utils ---
 const ONE_DAY = 24 * 60 * 60 * 1000;
@@ -48,24 +48,28 @@ function NumberField({ value, placeholder, width='100%', onCommit }){
 }
 
 function computeShopBuckets(projects, weekStarts, mapShop, confirmations){
-  const buckets = weekStarts.map(()=> ({ High:0, Medium:0, Low:0, Unassigned:0 }));
+  const buckets = weekStarts.map(()=> ({ High:0, Medium:0, Low:0, Unassigned:0, Diff:0, Planned:0, Expected:0 }));
   const keyShop = (proj,w)=> `Shop|${proj}|${w}`;
   for(const proj of projects){
     for(let i=0;i<weekStarts.length;i++){
       const w=weekStarts[i];
       const planned = mapShop.get(`${proj}|${w}`) || 0;
       const c = confirmations[keyShop(proj,w)] || { probCat:'', expected:'' };
-      const expected = c && c.expected!=='' ? Math.max(0, Number(c.expected)) : planned;
-      if(c && c.probCat){
-        const cat = c.probCat; // 'High' | 'Medium' | 'Low'
-        if(cat==='High' || cat==='Medium' || cat==='Low'){
-          buckets[i][cat] += expected;
-          buckets[i].Unassigned += Math.max(0, planned - expected);
-        } else {
-          buckets[i].Unassigned += planned;
+      let expected = planned;
+      if(c && c.expected!=='' && !isNaN(Number(c.expected))){
+        expected = Math.max(0, Number(c.expected));
+      }
+      buckets[i].Planned += planned;
+
+      if(c && (c.probCat==='High' || c.probCat==='Medium' || c.probCat==='Low')){
+        buckets[i][c.probCat] += expected;
+        buckets[i].Expected += expected;
+        if(planned > expected){
+          buckets[i].Diff += planned - expected;
         }
       }else{
-        buckets[i].Unassigned += planned;
+        buckets[i].Unassigned += expected; // expected equals planned when no probCat
+        buckets[i].Expected += expected;
       }
     }
   }
@@ -193,7 +197,24 @@ export default function App(){
   const getConf=(p,w)=> confs[keyShop(p,w)] || { probCat:'', expected:'' };
   const setConf=(p,w,patch)=> setConfs(prev=>({ ...prev, [keyShop(p,w)]: { ...getConf(p,w), ...patch } }));
 
+  const [activeCats,setActiveCats]=useState(()=> new Set(['High','Medium','Low']));
+  const [showMA,setShowMA]=useState(false);
+
   const weekStarts=useMemo(()=>{ const base=new Date(startISO+'T00:00:00Z'); return Array.from({length:look},(_,i)=>fmtISO(new Date(base.getTime()+i*7*ONE_DAY))); },[startISO,look]);
+
+  function toggleCat(cat){
+    setActiveCats(prev=>{
+      const next = new Set(prev);
+      if(next.has(cat)) next.delete(cat); else next.add(cat);
+      return next;
+    });
+  }
+
+  function handleLegendClick(o){
+    const map = { ShopHigh:'High', ShopMed:'Medium', ShopLow:'Low' };
+    const cat = map[o.dataKey];
+    if(cat) toggleCat(cat);
+  }
 
   const projectList=useMemo(()=>{ const set=new Set(); loadingRows.forEach(r=>set.add(r.project)); shopRows.forEach(r=>set.add(r.project)); return Array.from(set).sort((a,b)=>a.localeCompare(b)); },[loadingRows,shopRows]);
   useEffect(()=>setProjects(projectList),[projectList]);
@@ -278,11 +299,49 @@ export default function App(){
       value: `${probTotals.Low.count} cards — ${probTotals.Low.tons.toFixed(2)}`
     }
   ];
-  const chartData=useMemo(()=> weekStarts.map((w,i)=>({
-    week:`W${i+1} — ${w}`,
-    ShopGrey:buckets[i]?.Unassigned||0, ShopHigh:buckets[i]?.High||0, ShopMed:buckets[i]?.Medium||0, ShopLow:buckets[i]?.Low||0,
-    Delivery: delSummary.reduce((s,r)=>s+(r.weeks[i]||0),0)
-  })),[weekStarts,buckets,delSummary]);
+  const chartData=useMemo(()=>{
+    const arr = weekStarts.map((w,i)=>{
+      const planned = buckets[i]?.Planned || 0;
+      const unass = buckets[i]?.Unassigned || 0;
+      const high = activeCats.has('High') ? (buckets[i]?.High || 0) : 0;
+      const med  = activeCats.has('Medium') ? (buckets[i]?.Medium || 0) : 0;
+      const low  = activeCats.has('Low') ? (buckets[i]?.Low || 0) : 0;
+      const expected = high + med + low + unass;
+      const diff = Math.max(0, planned - expected);
+      const delivery = delSummary.reduce((s,r)=>s+(r.weeks[i]||0),0);
+      return {
+        week:`W${i+1} — ${w}`,
+        ShopUnassigned: unass,
+        ShopHigh: high,
+        ShopMed: med,
+        ShopLow: low,
+        ShopDiff: diff,
+        Planned: planned,
+        ExpectedTotal: expected,
+        Delivery: delivery,
+      };
+    });
+    for(let i=0;i<arr.length;i++){
+      arr[i].ExpectedDelta = i>0 ? arr[i].ExpectedTotal - arr[i-1].ExpectedTotal : 0;
+      arr[i].DeliveryDelta = i>0 ? arr[i].Delivery - arr[i-1].Delivery : 0;
+      const win = arr.slice(Math.max(0,i-2), i+1);
+      arr[i].DeliveryMA = win.reduce((s,r)=>s+r.Delivery,0)/win.length;
+    }
+    return arr;
+  },[weekStarts,buckets,delSummary,activeCats]);
+
+  function CustomTooltip({ active, payload, label }){
+    if(!active || !payload || !payload.length) return null;
+    const p = payload[0].payload;
+    return (
+      <div style={{ background:'#fff', border:'1px solid #d1d5db', padding:8 }}>
+        <div><strong>{label}</strong></div>
+        <div>Planned: {p.Planned?.toFixed(2)}</div>
+        <div>Expected: {p.ExpectedTotal?.toFixed(2)} (Δ {p.ExpectedDelta?.toFixed(2)})</div>
+        <div>Delivery: {p.Delivery?.toFixed(2)} (Δ {p.DeliveryDelta?.toFixed(2)})</div>
+      </div>
+    );
+  }
 
   function onUploadFile(f) {
     const reader = new FileReader();
@@ -380,6 +439,7 @@ export default function App(){
         <select value={view} onChange={e=>setView(e.target.value)}><option value="both">Both</option><option value="shop">Shop</option><option value="delivery">Delivery</option></select>
       </label>
       <label>Hide zeros <input type="checkbox" checked={hideZero} onChange={e=>setHideZero(e.target.checked)} /></label>
+      <label>Moving avg <input type="checkbox" checked={showMA} onChange={e=>setShowMA(e.target.checked)} /></label>
     </div>
     <div style={{margin:'12px 0'}}>Load Excel: <input type="file" accept=".xlsx,.xls" onChange={e=> e.target.files && e.target.files[0] && onUploadFile(e.target.files[0])} />
     {cleanedBlob && (
@@ -407,57 +467,86 @@ export default function App(){
         margin: '12px 0 0',
       }}
     >
-      {kpiCards.map(card => (
-        <div
-          key={card.key}
-          style={{
-            background: '#fff',
-            border: '1px solid #e5e7eb',
-            borderRadius: 12,
-            padding: 12,
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'center',
-            alignItems: 'center',
-            aspectRatio: '2',
-            textAlign: 'center',
-          }}
-        >
-          <div style={{ color: '#6b7280', fontSize: 12 }}>{card.label}</div>
+      {kpiCards.map(card => {
+        const catName = card.key.charAt(0).toUpperCase() + card.key.slice(1);
+        const clickable = ['high','medium','low'].includes(card.key);
+        const active = clickable ? activeCats.has(catName) : true;
+        return (
           <div
+            key={card.key}
+            onClick={() => clickable && toggleCat(catName)}
             style={{
-              fontWeight: 700,
-              fontSize: 20,
-              color: card.valueColor || '#111827',
+              background: '#fff',
+              border: '1px solid #e5e7eb',
+              borderRadius: 12,
+              padding: 12,
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              alignItems: 'center',
+              aspectRatio: '2',
+              textAlign: 'center',
+              cursor: clickable ? 'pointer' : 'default',
+              opacity: active ? 1 : 0.3,
             }}
           >
-            {card.value}
+            <div style={{ color: '#6b7280', fontSize: 12 }}>{card.label}</div>
+            <div
+              style={{
+                fontWeight: 700,
+                fontSize: 20,
+                color: card.valueColor || '#111827',
+              }}
+            >
+              {card.value}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
 <div style={{margin: '12px 0 0'}}>
   <div style={{height: 260, border:'1px solid #eee', borderRadius:16, padding:12}}>
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={chartData}>
+      <ComposedChart data={chartData}>
+        <defs>
+          <pattern id="gapHatch" patternUnits="userSpaceOnUse" width="4" height="4">
+            <path d="M0 0L4 4M4 0L0 4" stroke="#9ca3af" strokeWidth="1" />
+          </pattern>
+        </defs>
         <CartesianGrid strokeDasharray="3 3" />
-        <XAxis dataKey="week" /><YAxis /><Tooltip /><Legend />
+        <XAxis dataKey="week" />
+        <YAxis />
+        <Tooltip content={<CustomTooltip />} />
+        <Legend onClick={handleLegendClick} />
 
-        {/* Shop bars shown unless view=delivery */}
         {view !== 'delivery' && (
           <>
-            <Bar stackId="shop" dataKey="ShopGrey"  name="Shop — Unassigned" fill="#9ca3af" />
-            <Bar stackId="shop" dataKey="ShopHigh"  name="Shop — High"       fill="#16a34a" />
-            <Bar stackId="shop" dataKey="ShopMed"   name="Shop — Medium"     fill="#f59e0b" />
-            <Bar stackId="shop" dataKey="ShopLow"   name="Shop — Low"        fill="#ef4444" />
+            <Bar stackId="shop" dataKey="ShopUnassigned" name="Shop — Unassigned" fill="#9ca3af" />
+            <Bar stackId="shop" dataKey="ShopHigh" name="Shop — High" fill="#16a34a" />
+            <Bar stackId="shop" dataKey="ShopMed" name="Shop — Medium" fill="#f59e0b" />
+            <Bar stackId="shop" dataKey="ShopLow" name="Shop — Low" fill="#ef4444" />
+            <Bar stackId="shop" dataKey="ShopDiff" name="Planned gap" fill="url(#gapHatch)" legendType="none">
+              <LabelList content={({x,y,width,height,payload})=>{
+                const expected = payload.ExpectedTotal;
+                const yy = y + height - 4;
+                return <text x={x+width/2} y={yy} textAnchor="middle" fontSize={10}>{expected? expected.toFixed(0):''}</text>;
+              }} />
+            </Bar>
           </>
         )}
 
-        {/* Delivery bar shown unless view=shop */}
         {view !== 'shop' && (
           <Bar dataKey="Delivery" name="Delivery (planned)" fill="#2563eb" />
         )}
-      </BarChart>
+
+        <Line type="monotone" dataKey="Planned" stroke="#111827" strokeWidth={2} dot={false} label={({x,y,value})=> (
+          <text x={x} y={y-4} textAnchor="middle" fontSize={10}>{value? value.toFixed(0):''}</text>
+        )} />
+
+        {showMA && view !== 'shop' && (
+          <Line type="monotone" dataKey="DeliveryMA" name="Delivery 3w MA" stroke="#2563eb" strokeDasharray="5 5" dot={false} />
+        )}
+      </ComposedChart>
     </ResponsiveContainer>
   </div>
 </div>
