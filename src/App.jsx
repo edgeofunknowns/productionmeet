@@ -555,11 +555,17 @@ export default function App(){
             <Bar stackId="shop" dataKey="ShopMed" name="Shop — Medium" fill="#f59e0b" />
             <Bar stackId="shop" dataKey="ShopLow" name="Shop — Low" fill="#ef4444" />
             <Bar stackId="shop" dataKey="ShopDiff" name="Planned gap" fill="url(#gapHatch)" legendType="none">
-              <LabelList content={({x,y,width,height,payload})=>{
-                const expected = payload.ExpectedTotal;
-                const yy = y + height - 4;
-                return <text x={x+width/2} y={yy} textAnchor="middle" fontSize={10}>{expected? expected.toFixed(0):''}</text>;
-              }} />
+              <LabelList
+                content={({ x, y, width, height, payload }) => {
+                  const expected = payload?.ExpectedTotal;
+                  const yy = y + height - 4;
+                  return expected ? (
+                    <text x={x + width / 2} y={yy} textAnchor="middle" fontSize={10}>
+                      {expected.toFixed(0)}
+                    </text>
+                  ) : null;
+                }}
+              />
             </Bar>
           </>
         )}
